@@ -73,7 +73,10 @@ const state = {
   videos: [],
   query: '',
   activeTag: null,
+  activeGroup: null,   // null=全部, '__none__'=未分组, 否则是分组名
   onlyStar: false,
+  groupPool: [],       // 所有分组（含暂时没有视频的空分组）
+  importGroups: [],
   currentId: null,
   importTags: [],
   storage: { usage: 0, quota: 0, persisted: false },
@@ -263,14 +266,69 @@ async function removeVideo(v) {
 /* ============================================================
    渲染
    ============================================================ */
+/* ============================================================
+   分组
+   ============================================================ */
+const GROUPS_KEY = 'vault-groups';
+
+function loadGroupPool() {
+  try {
+    const raw = localStorage.getItem(GROUPS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    state.groupPool = Array.isArray(arr)
+      ? arr.filter((x) => typeof x === 'string' && x.trim()).slice(0, 200)
+      : [];
+  } catch { state.groupPool = []; }
+}
+
+function saveGroupPool() {
+  try { localStorage.setItem(GROUPS_KEY, JSON.stringify(state.groupPool)); } catch {}
+}
+
+function addGroupToPool(name) {
+  const n = String(name || '').trim().slice(0, 24);
+  if (!n) return null;
+  if (!state.groupPool.includes(n)) {
+    state.groupPool.push(n);
+    saveGroupPool();
+  }
+  return n;
+}
+
+/* 分组名 + 每个分组里的视频数 */
+function groupCounts() {
+  const m = new Map();
+  let none = 0;
+  for (const v of state.videos) {
+    const gs = v.groups || [];
+    if (!gs.length) { none++; continue; }
+    for (const g of gs) m.set(g, (m.get(g) || 0) + 1);
+  }
+  for (const g of state.groupPool) if (!m.has(g)) m.set(g, 0);
+  return { map: m, none };
+}
+
+/* 分组池 + 视频里出现过的分组，去重排序 */
+function allGroupNames() {
+  const { map } = groupCounts();
+  const set = new Set([...state.groupPool, ...map.keys()]);
+  return [...set].filter((x) => x && x !== '__none__').sort((a, b) => a.localeCompare(b, 'zh'));
+}
+
 function visibleVideos() {
   const q = state.query.trim().toLowerCase();
   const list = state.videos.filter((v) => {
     if (state.onlyStar && !v.starred) return false;
     if (state.activeTag && !(v.tags || []).includes(state.activeTag)) return false;
+    if (state.activeGroup === '__none__') {
+      if ((v.groups || []).length) return false;
+    } else if (state.activeGroup) {
+      if (!(v.groups || []).includes(state.activeGroup)) return false;
+    }
     if (!q) return true;
     if ((v.title || '').toLowerCase().includes(q)) return true;
-    return (v.tags || []).some((t) => t.toLowerCase().includes(q));
+    if ((v.tags || []).some((t) => t.toLowerCase().includes(q))) return true;
+    return (v.groups || []).some((g) => g.toLowerCase().includes(q));
   });
   // 标星的排前面；sort 是稳定的，其余之间顺序不变
   return list.slice().sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0));
@@ -281,10 +339,26 @@ function renderTags() {
   bar.innerHTML = '';
 
   const all = document.createElement('button');
-  all.className = 'chip' + (!state.activeTag && !state.onlyStar ? ' active' : '');
+  all.className = 'chip' + (!state.activeTag && !state.onlyStar && !state.activeGroup ? ' active' : '');
   all.textContent = '全部';
-  all.onclick = () => { state.activeTag = null; state.onlyStar = false; renderTags(); renderGrid(); };
+  all.onclick = () => {
+    state.activeTag = null;
+    state.onlyStar = false;
+    state.activeGroup = null;
+    renderTags();
+    renderGrid();
+  };
   bar.appendChild(all);
+
+  // 分组入口：显示当前分组名，点开是分组面板
+  const grp = document.createElement('button');
+  grp.className = 'chip group' + (state.activeGroup ? ' active' : '');
+  grp.textContent = state.activeGroup === '__none__'
+    ? '未分组 ▾'
+    : state.activeGroup ? state.activeGroup + ' ▾' : '分组 ▾';
+  grp.setAttribute('aria-label', '选择分组');
+  grp.onclick = () => { renderGroupList(); openSheet('groupSheet'); };
+  bar.appendChild(grp);
 
   const star = document.createElement('button');
   star.className = 'chip star' + (state.onlyStar ? ' active' : '');
@@ -311,6 +385,160 @@ function renderTags() {
     bar.appendChild(b);
   }
 }
+
+/* ============================================================
+   分组面板
+   ============================================================ */
+function renderGroupList() {
+  const box = $('#groupList');
+  if (!box) return;
+  box.innerHTML = '';
+  const { map, none } = groupCounts();
+
+  const mk = (label, count, value) => {
+    const row = document.createElement('div');
+    row.className = 'group-row' + (state.activeGroup === value ? ' active' : '');
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    const l = document.createElement('span');
+    l.className = 'group-name';
+    l.textContent = label;
+    const c = document.createElement('span');
+    c.className = 'group-count';
+    c.textContent = String(count);
+    row.appendChild(l);
+    row.appendChild(c);
+    row.onclick = () => {
+      state.activeGroup = value;
+      closeSheet('groupSheet');
+      renderTags();
+      renderGrid();
+    };
+    row.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
+    };
+    return row;
+  };
+
+  box.appendChild(mk('全部分组', state.videos.length, null));
+  if (none) box.appendChild(mk('未分组', none, '__none__'));
+
+  for (const name of allGroupNames()) {
+    const row = mk(name, map.get(name) || 0, name);
+    const del = document.createElement('span');
+    del.className = 'group-del';
+    del.textContent = '✕';
+    del.setAttribute('role', 'button');
+    del.setAttribute('aria-label', '删除分组 ' + name);
+    del.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!confirm(`删除分组「${name}」？\n视频不会被删，只是从这个分组里移出来。`)) return;
+      state.groupPool = state.groupPool.filter((g) => g !== name);
+      saveGroupPool();
+      for (const v of state.videos) {
+        if ((v.groups || []).includes(name)) {
+          v.groups = v.groups.filter((g) => g !== name);
+          await saveVideo(v);
+        }
+      }
+      if (state.activeGroup === name) state.activeGroup = null;
+      renderGroupList();
+      renderTags();
+      renderGrid();
+      toast('已删除分组「' + name + '」', 1800);
+    };
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+}
+
+/* 导入面板里的分组多选 */
+function renderImportGroups() {
+  const box = $('#importGroups');
+  if (!box) return;
+  box.innerHTML = '';
+  const names = allGroupNames();
+  if (!names.length) {
+    const h = document.createElement('span');
+    h.className = 'chip-hint';
+    h.textContent = '还没分组，在下面新建一个';
+    box.appendChild(h);
+    return;
+  }
+  for (const name of names) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (state.importGroups.includes(name) ? ' active' : '');
+    b.textContent = name;
+    b.onclick = () => {
+      const i = state.importGroups.indexOf(name);
+      if (i >= 0) state.importGroups.splice(i, 1);
+      else state.importGroups.push(name);
+      renderImportGroups();
+    };
+    box.appendChild(b);
+  }
+}
+
+/* 编辑面板里的分组多选 */
+let editorGroups = [];
+
+function renderEditorGroups() {
+  const box = $('#eGroups');
+  if (!box) return;
+  box.innerHTML = '';
+  const names = allGroupNames();
+  if (!names.length) {
+    const h = document.createElement('span');
+    h.className = 'chip-hint';
+    h.textContent = '还没分组，在下面新建一个';
+    box.appendChild(h);
+    return;
+  }
+  for (const name of names) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (editorGroups.includes(name) ? ' active' : '');
+    b.textContent = name;
+    b.onclick = () => {
+      const i = editorGroups.indexOf(name);
+      if (i >= 0) editorGroups.splice(i, 1);
+      else editorGroups.push(name);
+      renderEditorGroups();
+    };
+    box.appendChild(b);
+  }
+}
+
+/* 新建分组的三个入口 */
+function bindNewGroup(inputSel, btnSel, onAdded) {
+  const input = $(inputSel);
+  const btn = $(btnSel);
+  if (!input || !btn) return;
+  const run = () => {
+    const name = addGroupToPool(input.value);
+    if (!name) { toast('先写个分组名'); return; }
+    input.value = '';
+    if (onAdded) onAdded(name);
+    renderTags();
+  };
+  btn.onclick = run;
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); run(); }
+  };
+}
+
+bindNewGroup('#newGroupInput', '#addGroupBtn', () => {
+  renderGroupList();
+  renderImportGroups();
+  renderEditorGroups();
+});
+bindNewGroup('#importNewGroup', '#importAddGroup', (name) => {
+  if (!state.importGroups.includes(name)) state.importGroups.push(name);
+  renderImportGroups();
+});
+bindNewGroup('#eNewGroup', '#eAddGroup', (name) => {
+  if (!editorGroups.includes(name)) editorGroups.push(name);
+  renderEditorGroups();
+});
 
 function placeholderCover() {
   const d = document.createElement('div');
@@ -380,7 +608,8 @@ function cardEl(v) {
   el.appendChild(shade);
 
   const tags = (v.tags || []);
-  if (tags.length || v.kind === 'link') {
+  const groups = (v.groups || []);
+  if (tags.length || groups.length || v.kind === 'link') {
     const wrap = document.createElement('div');
     wrap.className = 'c-tags';
     if (v.kind === 'link') {
@@ -392,7 +621,13 @@ function cardEl(v) {
         : (v.site || '网页');
       wrap.appendChild(s);
     }
-    for (const t of tags.slice(0, v.kind === 'link' ? 1 : 2)) {
+    for (const g of groups.slice(0, 1)) {
+      const s = document.createElement('span');
+      s.className = 'c-tag c-group';
+      s.textContent = g;
+      wrap.appendChild(s);
+    }
+    for (const t of tags.slice(0, 2)) {
       const s = document.createElement('span');
       s.className = 'c-tag';
       s.textContent = t;
@@ -537,6 +772,7 @@ document.querySelectorAll('.sheet').forEach((s) => {
 $('#fab').onclick = () => {
   openSheet('importSheet');
   try { renderImportTags(); } catch (e) { console.warn(e); }
+  try { renderImportGroups(); } catch (e) { console.warn(e); }
   refreshStorage();
 };
 
@@ -687,7 +923,7 @@ function queueItem(name) {
   };
 }
 
-async function importOne(file, tags) {
+async function importOne(file, tags, groups) {
   const item = queueItem(file.name);
   try {
     item.set(8);
@@ -712,6 +948,7 @@ async function importOne(file, tags) {
       id,
       title: safeTitle(file.name),
       tags: [...tags],
+      groups: [...(groups || [])],
       duration: meta.duration || 0,
       width: meta.width || 0,
       height: meta.height || 0,
@@ -782,7 +1019,7 @@ function parseUrl(raw) {
 }
 
 /* 先试着真的下载下来；下不了（跨域被挡 / 不是视频）就存成书签 */
-async function importLink(raw, tags) {
+async function importLink(raw, tags, groups) {
   const info = parseUrl(raw);
   if (!info) throw new Error('这不像一个网址（要 http:// 或 https:// 开头）');
 
@@ -830,6 +1067,7 @@ async function importLink(raw, tags) {
     thumb: info.thumb,
     title: info.site + ' 视频',
     tags: [...tags],
+    groups: [...(groups || [])],
     duration: 0, width: 0, height: 0, size: 0,
     starred: false,
     createdAt: Date.now(),
@@ -848,12 +1086,13 @@ async function handleFiles(fileList) {
   importing = true;
   $('#uploadQueue').innerHTML = '';
   const tags = [...state.importTags];
+  const groups = [...state.importGroups];
   let ok = 0, bad = 0;
   let bytes = 0;
 
   for (const f of files) {
     try {
-      await importOne(f, tags);
+      await importOne(f, tags, groups);
       ok++;
       bytes += f.size || 0;
     } catch (e) {
@@ -922,7 +1161,7 @@ $('#linkAdd').onclick = async () => {
   btn.disabled = true;
   btn.textContent = '处理中…';
   try {
-    const v = await importLink(url, [...state.importTags]);
+    const v = await importLink(url, [...state.importTags], [...state.importGroups]);
     $('#linkInput').value = '';
     renderTags();
     renderGrid();
@@ -1021,6 +1260,12 @@ function renderPlayerMeta(v) {
 function renderPlayerTags(v) {
   const box = $('#pTags');
   box.innerHTML = '';
+  for (const g of (v.groups || [])) {
+    const s = document.createElement('span');
+    s.className = 'chip group';
+    s.textContent = g;
+    box.appendChild(s);
+  }
   for (const t of (v.tags || [])) {
     const s = document.createElement('span');
     s.className = 'chip';
@@ -1172,6 +1417,8 @@ function openEditor(id) {
   if (!v) return;
   editingId = v.id;
   $('#eTitle').value = v.title;
+  editorGroups = [...(v.groups || [])];
+  renderEditorGroups();
   renderEditorTags();
   openSheet('editor');
 }
@@ -1198,6 +1445,7 @@ $('#eSave').onclick = async () => {
   const v = findVideo(editingId);
   if (!v) return;
   v.title = String($('#eTitle').value || '').trim().slice(0, 120) || '未命名';
+  v.groups = [...editorGroups];
   await saveVideo(v);
   editingId = null;
   closeSheet('editor');
@@ -1284,8 +1532,12 @@ async function boot() {
   } catch {}
 
   await loadAll();
-  // 老数据没有 starred 字段，补成 false
-  for (const v of state.videos) if (typeof v.starred !== 'boolean') v.starred = false;
+  // 老数据字段兼容
+  for (const v of state.videos) {
+    if (typeof v.starred !== 'boolean') v.starred = false;
+    if (!Array.isArray(v.groups)) v.groups = [];
+  }
+  loadGroupPool();
   rebuildTags();
   renderTags();
   renderGrid();

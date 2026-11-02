@@ -95,6 +95,15 @@
     </div>
 
     <div class="tag-picker">
+      <div class="tag-picker-head">放进分组（可多选，可跳过）</div>
+      <div id="importGroups" class="chip-wrap"></div>
+      <div class="newtag-row">
+        <input id="importNewGroup" placeholder="新分组…" maxlength="24">
+        <button id="importAddGroup" class="mini-btn">加</button>
+      </div>
+    </div>
+
+    <div class="tag-picker">
       <div class="tag-picker-head">打标签（可跳过）</div>
       <div id="importTags" class="chip-wrap"></div>
       <div class="newtag-row">
@@ -115,8 +124,23 @@
       <button class="sheet-close" data-close="cardMenu">✕</button>
     </div>
     <button id="cmStar" class="action-btn"><span class="action-ico">★</span><span class="action-label">标星</span></button>
-    <button id="cmEdit" class="action-btn"><span class="action-ico">✎</span><span class="action-label">改标题 / 标签</span></button>
+    <button id="cmEdit" class="action-btn"><span class="action-ico">✎</span><span class="action-label">改标题 / 分组 / 标签</span></button>
     <button id="cmDelete" class="action-btn danger"><span class="action-ico">🗑</span><span class="action-label">删除</span></button>
+  </div>
+</div>
+
+<!-- ============ 分组面板 ============ -->
+<div id="groupSheet" class="sheet">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2>分组</h2>
+      <button class="sheet-close" data-close="groupSheet">✕</button>
+    </div>
+    <div id="groupList" class="group-list"></div>
+    <div class="newtag-row">
+      <input id="newGroupInput" placeholder="新分组…" maxlength="24">
+      <button id="addGroupBtn" class="mini-btn">加</button>
+    </div>
   </div>
 </div>
 
@@ -145,7 +169,7 @@
     <div id="pTags" class="chip-wrap small"></div>
     <div id="pMeta" class="p-meta"></div>
     <div class="player-actions">
-      <button id="pEdit" class="ghost-btn">改标题 / 标签</button>
+      <button id="pEdit" class="ghost-btn">改标题 / 分组 / 标签</button>
       <button id="pDelete" class="ghost-btn danger">删除</button>
     </div>
     <a id="pVisitSite" class="visit-site" href="#" target="_blank" rel="noopener" hidden>在原网站打开 ↗</a>
@@ -163,6 +187,14 @@
       <span>标题</span>
       <input id="eTitle" maxlength="120">
     </label>
+    <div class="field">
+      <span>分组</span>
+      <div id="eGroups" class="chip-wrap"></div>
+      <div class="newtag-row">
+        <input id="eNewGroup" placeholder="新分组…" maxlength="24">
+        <button id="eAddGroup" class="mini-btn">加</button>
+      </div>
+    </div>
     <div class="field">
       <span>标签</span>
       <div id="eTags" class="chip-wrap"></div>
