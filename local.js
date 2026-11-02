@@ -270,14 +270,21 @@ async function removeVideo(v) {
    分组
    ============================================================ */
 const GROUPS_KEY = 'vault-groups';
+const GROUP_ICONS = ['📁', '🌴', '📚', '🎬', '🐱', '✈️', '🍜', '💼', '🎵', '🏠', '⭐', '❤️', '🎮', '🏀', '🌸', '🎨', '🐳', '🌊'];
+let newGroupIcon = '📁';
 
 function loadGroupPool() {
   try {
     const raw = localStorage.getItem(GROUPS_KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    state.groupPool = Array.isArray(arr)
-      ? arr.filter((x) => typeof x === 'string' && x.trim()).slice(0, 200)
-      : [];
+    state.groupPool = (Array.isArray(arr) ? arr : [])
+      .map((x) => {
+        if (typeof x === 'string') return { name: x.trim(), icon: '📁' };
+        if (x && typeof x.name === 'string') return { name: x.name.trim(), icon: x.icon || '📁' };
+        return null;
+      })
+      .filter((x) => x && x.name)
+      .slice(0, 200);
   } catch { state.groupPool = []; }
 }
 
@@ -285,14 +292,44 @@ function saveGroupPool() {
   try { localStorage.setItem(GROUPS_KEY, JSON.stringify(state.groupPool)); } catch {}
 }
 
-function addGroupToPool(name) {
+function groupIcon(name) {
+  const g = state.groupPool.find((x) => x.name === name);
+  return g ? g.icon : '📁';
+}
+
+function addGroupToPool(name, icon) {
   const n = String(name || '').trim().slice(0, 24);
   if (!n) return null;
-  if (!state.groupPool.includes(n)) {
-    state.groupPool.push(n);
-    saveGroupPool();
-  }
+  if (state.groupPool.some((g) => g.name === n)) return n;
+  state.groupPool.push({ name: n, icon: icon || '📁' });
+  saveGroupPool();
   return n;
+}
+
+/* 改名：分组池、每个视频的 groups、当前筛选，一起改 */
+async function renameGroup(oldName, newName) {
+  const n = String(newName || '').trim().slice(0, 24);
+  if (!n || !oldName || n === oldName) return false;
+  if (state.groupPool.some((g) => g.name === n)) return false;
+  const g = state.groupPool.find((x) => x.name === oldName);
+  if (!g) return false;
+  g.name = n;
+  saveGroupPool();
+  for (const v of state.videos) {
+    if ((v.groups || []).includes(oldName)) {
+      v.groups = v.groups.map((x) => (x === oldName ? n : x));
+      await saveVideo(v);
+    }
+  }
+  if (state.activeGroup === oldName) state.activeGroup = n;
+  return true;
+}
+
+function setGroupIcon(name, icon) {
+  const g = state.groupPool.find((x) => x.name === name);
+  if (!g) return;
+  g.icon = icon || '📁';
+  saveGroupPool();
 }
 
 /* 分组名 + 每个分组里的视频数 */
@@ -304,14 +341,14 @@ function groupCounts() {
     if (!gs.length) { none++; continue; }
     for (const g of gs) m.set(g, (m.get(g) || 0) + 1);
   }
-  for (const g of state.groupPool) if (!m.has(g)) m.set(g, 0);
+  for (const g of state.groupPool) if (!m.has(g.name)) m.set(g.name, 0);
   return { map: m, none };
 }
 
 /* 分组池 + 视频里出现过的分组，去重排序 */
 function allGroupNames() {
   const { map } = groupCounts();
-  const set = new Set([...state.groupPool, ...map.keys()]);
+  const set = new Set([...state.groupPool.map((g) => g.name), ...map.keys()]);
   return [...set].filter((x) => x && x !== '__none__').sort((a, b) => a.localeCompare(b, 'zh'));
 }
 
@@ -354,10 +391,10 @@ function renderTags() {
   const grp = document.createElement('button');
   grp.className = 'chip group' + (state.activeGroup ? ' active' : '');
   grp.textContent = state.activeGroup === '__none__'
-    ? '未分组 ▾'
-    : state.activeGroup ? state.activeGroup + ' ▾' : '分组 ▾';
+    ? '📥 未分组 ▾'
+    : state.activeGroup ? groupIcon(state.activeGroup) + ' ' + state.activeGroup + ' ▾' : '📁 分组 ▾';
   grp.setAttribute('aria-label', '选择分组');
-  grp.onclick = () => { renderGroupList(); openSheet('groupSheet'); };
+  grp.onclick = () => { renderGroupList(); renderIconPicker(); openSheet('groupSheet'); };
   bar.appendChild(grp);
 
   const star = document.createElement('button');
@@ -389,25 +426,98 @@ function renderTags() {
 /* ============================================================
    分组面板
    ============================================================ */
+/* 点某行的 ✎，就地改名 */
+function startRename(row, oldName) {
+  if (row.querySelector('.group-rename')) return;
+  const nameEl = row.querySelector('.group-name');
+  if (!nameEl) return;
+  const input = document.createElement('input');
+  input.className = 'group-rename';
+  input.value = oldName;
+  input.maxLength = 24;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const val = input.value.trim();
+    if (save && val && val !== oldName) {
+      const okr = await renameGroup(oldName, val);
+      if (!okr) toast('已经有同名分组了', 2200);
+    }
+    renderGroupList();
+    renderTags();
+    renderGrid();
+  };
+  input.onblur = () => finish(true);
+  input.onclick = (e) => e.stopPropagation();
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+}
+
+/* 点分组图标，就地换一个 */
+function startIconPick(row, name) {
+  const icoEl = row.querySelector('.group-ico');
+  if (!icoEl || row.querySelector('.ico-pop')) return;
+  const pop = document.createElement('div');
+  pop.className = 'ico-pop';
+  for (const ic of GROUP_ICONS) {
+    const b = document.createElement('button');
+    b.className = 'ico-pick' + (groupIcon(name) === ic ? ' active' : '');
+    b.textContent = ic;
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      setGroupIcon(name, ic);
+      renderGroupList();
+      renderTags();
+      renderGrid();
+    };
+    pop.appendChild(b);
+  }
+  row.appendChild(pop);
+  row.classList.add('picking');
+
+  const close = (ev) => {
+    if (pop.contains(ev.target) || icoEl.contains(ev.target)) return;
+    document.removeEventListener('click', close, true);
+    renderGroupList();
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 60);
+}
+
 function renderGroupList() {
   const box = $('#groupList');
   if (!box) return;
   box.innerHTML = '';
   const { map, none } = groupCounts();
 
-  const mk = (label, count, value) => {
+  const mk = (icon, label, count, value, editable) => {
     const row = document.createElement('div');
     row.className = 'group-row' + (state.activeGroup === value ? ' active' : '');
     row.setAttribute('role', 'button');
     row.tabIndex = 0;
+
+    const ic = document.createElement('span');
+    ic.className = 'group-ico';
+    ic.textContent = icon;
+
     const l = document.createElement('span');
     l.className = 'group-name';
     l.textContent = label;
+
     const c = document.createElement('span');
     c.className = 'group-count';
     c.textContent = String(count);
+
+    row.appendChild(ic);
     row.appendChild(l);
     row.appendChild(c);
+
     row.onclick = () => {
       state.activeGroup = value;
       closeSheet('groupSheet');
@@ -417,38 +527,67 @@ function renderGroupList() {
     row.onkeydown = (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
     };
+
+    if (editable) {
+      ic.onclick = (ev) => { ev.stopPropagation(); startIconPick(row, value); };
+
+      const ed = document.createElement('span');
+      ed.className = 'group-act';
+      ed.textContent = '✎';
+      ed.setAttribute('role', 'button');
+      ed.setAttribute('aria-label', '重命名 ' + label);
+      ed.onclick = (ev) => { ev.stopPropagation(); startRename(row, value); };
+      row.appendChild(ed);
+
+      const del = document.createElement('span');
+      del.className = 'group-act danger';
+      del.textContent = '✕';
+      del.setAttribute('role', 'button');
+      del.setAttribute('aria-label', '删除分组 ' + label);
+      del.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`删除分组「${label}」？\n视频不会被删，只是从这个分组里移出来。`)) return;
+        state.groupPool = state.groupPool.filter((g) => g.name !== label);
+        saveGroupPool();
+        for (const v of state.videos) {
+          if ((v.groups || []).includes(label)) {
+            v.groups = v.groups.filter((g) => g !== label);
+            await saveVideo(v);
+          }
+        }
+        if (state.activeGroup === label) state.activeGroup = null;
+        renderGroupList();
+        renderTags();
+        renderGrid();
+        toast('已删除分组「' + label + '」', 1800);
+      };
+      row.appendChild(del);
+    }
     return row;
   };
 
-  box.appendChild(mk('全部分组', state.videos.length, null));
-  if (none) box.appendChild(mk('未分组', none, '__none__'));
+  box.appendChild(mk('📚', '全部分组', state.videos.length, null, false));
+  if (none) box.appendChild(mk('📥', '未分组', none, '__none__', false));
 
   for (const name of allGroupNames()) {
-    const row = mk(name, map.get(name) || 0, name);
-    const del = document.createElement('span');
-    del.className = 'group-del';
-    del.textContent = '✕';
-    del.setAttribute('role', 'button');
-    del.setAttribute('aria-label', '删除分组 ' + name);
-    del.onclick = async (ev) => {
-      ev.stopPropagation();
-      if (!confirm(`删除分组「${name}」？\n视频不会被删，只是从这个分组里移出来。`)) return;
-      state.groupPool = state.groupPool.filter((g) => g !== name);
-      saveGroupPool();
-      for (const v of state.videos) {
-        if ((v.groups || []).includes(name)) {
-          v.groups = v.groups.filter((g) => g !== name);
-          await saveVideo(v);
-        }
-      }
-      if (state.activeGroup === name) state.activeGroup = null;
-      renderGroupList();
-      renderTags();
-      renderGrid();
-      toast('已删除分组「' + name + '」', 1800);
+    box.appendChild(mk(groupIcon(name), name, map.get(name) || 0, name, true));
+  }
+}
+
+/* 新建分组时的图标选择 */
+function renderIconPicker() {
+  const box = $('#groupIcons');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const ic of GROUP_ICONS) {
+    const b = document.createElement('button');
+    b.className = 'ico-pick' + (newGroupIcon === ic ? ' active' : '');
+    b.textContent = ic;
+    b.onclick = () => {
+      newGroupIcon = ic;
+      renderIconPicker();
     };
-    row.appendChild(del);
-    box.appendChild(row);
+    box.appendChild(b);
   }
 }
 
@@ -468,7 +607,7 @@ function renderImportGroups() {
   for (const name of names) {
     const b = document.createElement('button');
     b.className = 'chip' + (state.importGroups.includes(name) ? ' active' : '');
-    b.textContent = name;
+    b.textContent = groupIcon(name) + ' ' + name;
     b.onclick = () => {
       const i = state.importGroups.indexOf(name);
       if (i >= 0) state.importGroups.splice(i, 1);
@@ -497,7 +636,7 @@ function renderEditorGroups() {
   for (const name of names) {
     const b = document.createElement('button');
     b.className = 'chip' + (editorGroups.includes(name) ? ' active' : '');
-    b.textContent = name;
+    b.textContent = groupIcon(name) + ' ' + name;
     b.onclick = () => {
       const i = editorGroups.indexOf(name);
       if (i >= 0) editorGroups.splice(i, 1);
@@ -514,7 +653,7 @@ function bindNewGroup(inputSel, btnSel, onAdded) {
   const btn = $(btnSel);
   if (!input || !btn) return;
   const run = () => {
-    const name = addGroupToPool(input.value);
+    const name = addGroupToPool(input.value, newGroupIcon);
     if (!name) { toast('先写个分组名'); return; }
     input.value = '';
     if (onAdded) onAdded(name);
@@ -770,6 +909,10 @@ document.querySelectorAll('.sheet').forEach((s) => {
   s.addEventListener('click', (e) => { if (e.target === s) closeSheet(s.id); });
 });
 $('#fab').onclick = () => {
+  // 正看着某个分组时，新导入的自动归到这一组，省一步
+  if (state.activeGroup && state.activeGroup !== '__none__') {
+    state.importGroups = [state.activeGroup];
+  }
   openSheet('importSheet');
   try { renderImportTags(); } catch (e) { console.warn(e); }
   try { renderImportGroups(); } catch (e) { console.warn(e); }
@@ -1263,7 +1406,7 @@ function renderPlayerTags(v) {
   for (const g of (v.groups || [])) {
     const s = document.createElement('span');
     s.className = 'chip group';
-    s.textContent = g;
+    s.textContent = groupIcon(g) + ' ' + g;
     box.appendChild(s);
   }
   for (const t of (v.tags || [])) {
