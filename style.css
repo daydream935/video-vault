@@ -564,6 +564,77 @@ textarea#linkInput::placeholder { color: #82828e; }
   .topbar { padding-left: 22px; padding-right: 22px; }
 }
 
+/* ================= 标星 ================= */
+.card.starred { box-shadow: inset 0 0 0 1.5px rgba(255, 194, 71, .5); }
+
+.card .c-star {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, .58);
+  backdrop-filter: blur(6px);
+  color: #ffc247;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* 有星标时，时长角标往左让位 */
+.card.starred .dur { right: 26px; }
+
+/* 标签条里的星标筛选 */
+.chip.star { padding: 0 12px; font-size: 15px; }
+.chip.star.active {
+  background: rgba(255, 194, 71, .15);
+  color: #ffc247;
+  border-color: rgba(255, 194, 71, .34);
+}
+
+/* 播放页右上角的星标按钮 */
+.player-counter { margin-left: auto; }
+.star-btn svg {
+  fill: none;
+  stroke: rgba(255, 255, 255, .9);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  transition: fill .16s ease, stroke .16s ease, transform .16s ease;
+}
+.star-btn.on svg { fill: #ffc247; stroke: #ffc247; }
+.star-btn.on:active svg { transform: scale(.86); }
+
+/* 长按卡片的操作菜单 */
+.action-body { padding-bottom: calc(16px + var(--safe-b)); }
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 14px 16px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: #e8e8ee;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  transition: background .14s;
+}
+.action-btn:active { background: #24242c; }
+.action-btn .action-ico {
+  width: 20px;
+  text-align: center;
+  font-size: 15px;
+  opacity: .85;
+}
+.action-btn.on .action-ico { color: #ffc247; opacity: 1; }
+.action-btn.danger { color: #ff7b7b; }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }

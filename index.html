@@ -91,6 +91,19 @@
   </div>
 </div>
 
+<!-- ============ 长按卡片的操作菜单 ============ -->
+<div id="cardMenu" class="sheet">
+  <div class="sheet-body action-body">
+    <div class="sheet-head">
+      <h2 id="cmTitle">视频</h2>
+      <button class="sheet-close" data-close="cardMenu">✕</button>
+    </div>
+    <button id="cmStar" class="action-btn"><span class="action-ico">★</span><span class="action-label">标星</span></button>
+    <button id="cmEdit" class="action-btn"><span class="action-ico">✎</span><span class="action-label">改标题 / 标签</span></button>
+    <button id="cmDelete" class="action-btn danger"><span class="action-ico">🗑</span><span class="action-label">删除</span></button>
+  </div>
+</div>
+
 <!-- ============ 播放器 ============ -->
 <div id="player" class="player">
   <div class="player-top">
@@ -98,6 +111,9 @@
       <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
     <span id="playerCounter" class="player-counter"></span>
+    <button id="pStar" class="icon-btn on-dark star-btn" aria-label="标星">
+      <svg viewBox="0 0 24 24"><path d="M12 3.6l2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.62l-5.1 2.68.97-5.68L3.75 9.6l5.7-.83z"/></svg>
+    </button>
   </div>
   <div class="player-stage"><video id="pv" playsinline controls preload="metadata"></video></div>
   <div class="player-info">

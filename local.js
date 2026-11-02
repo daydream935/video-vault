@@ -73,6 +73,7 @@ const state = {
   videos: [],
   query: '',
   activeTag: null,
+  onlyStar: false,
   currentId: null,
   importTags: [],
   storage: { usage: 0, quota: 0, persisted: false },
@@ -261,24 +262,40 @@ async function removeVideo(v) {
    ============================================================ */
 function visibleVideos() {
   const q = state.query.trim().toLowerCase();
-  return state.videos.filter((v) => {
+  const list = state.videos.filter((v) => {
+    if (state.onlyStar && !v.starred) return false;
     if (state.activeTag && !(v.tags || []).includes(state.activeTag)) return false;
     if (!q) return true;
     if ((v.title || '').toLowerCase().includes(q)) return true;
     return (v.tags || []).some((t) => t.toLowerCase().includes(q));
   });
+  // 标星的排前面；sort 是稳定的，其余之间顺序不变
+  return list.slice().sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0));
 }
 
 function renderTags() {
   const bar = $('#tagbar');
   bar.innerHTML = '';
-  if (!state.tags || !state.tags.length) return;
 
   const all = document.createElement('button');
-  all.className = 'chip' + (state.activeTag ? '' : ' active');
+  all.className = 'chip' + (!state.activeTag && !state.onlyStar ? ' active' : '');
   all.textContent = '全部';
-  all.onclick = () => { state.activeTag = null; renderTags(); renderGrid(); };
+  all.onclick = () => { state.activeTag = null; state.onlyStar = false; renderTags(); renderGrid(); };
   bar.appendChild(all);
+
+  const star = document.createElement('button');
+  star.className = 'chip star' + (state.onlyStar ? ' active' : '');
+  star.textContent = '★';
+  star.setAttribute('aria-label', '只看标星');
+  star.onclick = () => {
+    state.onlyStar = !state.onlyStar;
+    if (state.onlyStar) state.activeTag = null;
+    renderTags();
+    renderGrid();
+  };
+  bar.appendChild(star);
+
+  if (!state.tags || !state.tags.length) return;
 
   for (const t of state.tags) {
     const b = document.createElement('button');
@@ -353,7 +370,48 @@ function cardEl(v) {
   title.textContent = v.title;
   el.appendChild(title);
 
-  el.onclick = () => openPlayer(v.id);
+  if (v.starred) {
+    el.classList.add('starred');
+    const s = document.createElement('div');
+    s.className = 'c-star';
+    s.textContent = '★';
+    el.appendChild(s);
+  }
+
+  /* 长按 480ms 弹出操作菜单（标星 / 编辑 / 删除）。
+     手指移动超过 10px 就取消，避免滚动时误触。 */
+  let pressTimer = null;
+  let longPressed = false;
+  let sx = 0, sy = 0;
+
+  const clearPress = () => {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+  };
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    longPressed = false;
+    sx = e.clientX; sy = e.clientY;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      longPressed = true;
+      if (navigator.vibrate) { try { navigator.vibrate(12); } catch {} }
+      openCardMenu(v.id);
+    }, 480);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!pressTimer) return;
+    if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) clearPress();
+  });
+  el.addEventListener('pointerup', clearPress);
+  el.addEventListener('pointercancel', clearPress);
+  el.addEventListener('pointerleave', clearPress);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  el.onclick = () => {
+    if (longPressed) { longPressed = false; return; }
+    openPlayer(v.id);
+  };
   return el;
 }
 
@@ -613,6 +671,7 @@ async function importOne(file, tags) {
       mime: file.type || '',
       fileKey,
       thumbKey,
+      starred: false,
       createdAt: Date.now(),
     };
     await saveVideo(v);
@@ -680,6 +739,66 @@ $('#fileInput').onchange = async (e) => {
 const pv = $('#pv');
 let playerUrl = null;
 
+function renderStarBtn(v) {
+  const b = $('#pStar');
+  if (!b) return;
+  b.classList.toggle('on', !!(v && v.starred));
+  b.setAttribute('aria-label', v && v.starred ? '取消标星' : '标星');
+}
+
+async function toggleStar(v) {
+  if (!v) return;
+  v.starred = !v.starred;
+  await saveVideo(v);
+  renderGrid();
+  if (state.currentId === v.id) renderStarBtn(v);
+  toast(v.starred ? '★ 已标星' : '已取消标星', 1300);
+}
+
+/* 长按卡片弹出的操作菜单 */
+let menuId = null;
+
+function openCardMenu(id) {
+  const v = findVideo(id);
+  if (!v) return;
+  menuId = id;
+  $('#cmTitle').textContent = v.title;
+  const starBtn = $('#cmStar');
+  starBtn.classList.toggle('on', !!v.starred);
+  starBtn.querySelector('.action-ico').textContent = v.starred ? '★' : '☆';
+  starBtn.querySelector('.action-label').textContent = v.starred ? '取消标星' : '标星';
+  openSheet('cardMenu');
+}
+
+$('#cmStar').onclick = async () => {
+  const v = findVideo(menuId);
+  closeSheet('cardMenu');
+  if (v) await toggleStar(v);
+};
+
+$('#cmEdit').onclick = () => {
+  const id = menuId;
+  closeSheet('cardMenu');
+  if (id) openEditor(id);
+};
+
+$('#cmDelete').onclick = async () => {
+  const v = findVideo(menuId);
+  closeSheet('cardMenu');
+  if (!v) return;
+  if (!confirm(`删除「${v.title}」？\n文件会从这台手机上一起删掉，不能恢复。`)) return;
+  await removeVideo(v);
+  renderTags();
+  renderGrid();
+  await refreshStorage();
+  toast('已删除');
+};
+
+$('#pStar').onclick = () => {
+  const v = findVideo(state.currentId);
+  if (v) toggleStar(v);
+};
+
 function renderPlayerMeta(v) {
   const parts = [];
   if (v.size) parts.push(fmtSize(v.size));
@@ -719,6 +838,7 @@ async function openPlayer(id) {
   $('#pTitle').textContent = v.title;
   renderPlayerMeta(v);
   renderPlayerTags(v);
+  renderStarBtn(v);
 
   const list = visibleVideos();
   const idx = list.findIndex((x) => x.id === id);
@@ -781,8 +901,8 @@ function renderEditorTags() {
   }
 }
 
-function openEditor() {
-  const v = findVideo(state.currentId);
+function openEditor(id) {
+  const v = findVideo(id || state.currentId);
   if (!v) return;
   editingId = v.id;
   $('#eTitle').value = v.title;
@@ -790,7 +910,7 @@ function openEditor() {
   openSheet('editor');
 }
 
-$('#pEdit').onclick = openEditor;
+$('#pEdit').onclick = () => openEditor();
 
 $('#eAddTag').onclick = () => {
   const input = $('#eNewTag');
@@ -898,6 +1018,8 @@ async function boot() {
   } catch {}
 
   await loadAll();
+  // 老数据没有 starred 字段，补成 false
+  for (const v of state.videos) if (typeof v.starred !== 'boolean') v.starred = false;
   rebuildTags();
   renderTags();
   renderGrid();
