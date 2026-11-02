@@ -324,6 +324,22 @@ function placeholderCover() {
   return d;
 }
 
+/* 链接收藏的封面：外站图片加载不了（比如 YouTube 在国内）时，
+   显示带站点名的色块，而不是一块空白 */
+function linkCover(v) {
+  const d = document.createElement('div');
+  let cls = 'web', label = v.site || '网页';
+  if (v.source === 'youtube') { cls = 'yt'; label = 'YouTube'; }
+  else if (v.source === 'bilibili') { cls = 'bili'; label = 'B站'; }
+  else if (v.source === 'direct') { cls = 'direct'; label = v.site || '直链'; }
+  d.className = 'cover link-cover ' + cls;
+  const s = document.createElement('span');
+  s.className = 'lc-label';
+  s.textContent = label;
+  d.appendChild(s);
+  return d;
+}
+
 function cardEl(v) {
   const el = document.createElement('button');
   el.className = 'card';
@@ -341,17 +357,21 @@ function cardEl(v) {
       if (u) img.src = u;
       else { img.remove(); el.prepend(placeholderCover()); }
     });
-  } else if (v.kind === 'link' && v.thumb) {
-    // 链接收藏：YouTube 这类有现成的封面图
-    const img = document.createElement('img');
-    img.className = 'cover';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.alt = '';
-    img.referrerPolicy = 'no-referrer';
-    img.src = v.thumb;
-    img.onerror = () => { img.remove(); el.prepend(placeholderCover()); };
-    el.appendChild(img);
+  } else if (v.kind === 'link') {
+    // 链接收藏：有封面图就先试着加载，加载不出来（外网被挡）就用站点色块
+    if (v.thumb) {
+      const img = document.createElement('img');
+      img.className = 'cover';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.src = v.thumb;
+      img.onerror = () => { img.remove(); el.prepend(linkCover(v)); };
+      el.appendChild(img);
+    } else {
+      el.appendChild(linkCover(v));
+    }
   } else {
     el.appendChild(placeholderCover());
   }

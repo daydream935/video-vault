@@ -705,6 +705,24 @@ textarea#linkInput::placeholder { color: #82828e; }
   font-weight: 600;
 }
 
+/* 链接收藏的封面：外站图加载不了时显示的站点色块 */
+.card .link-cover {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(150deg, #1e1e28, #101014);
+}
+.card .link-cover.yt { background: linear-gradient(150deg, #3d1414, #170b0b); }
+.card .link-cover.bili { background: linear-gradient(150deg, #2b1730, #120b14); }
+.card .lc-label {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  color: rgba(255, 255, 255, .6);
+  word-break: break-all;
+}
+
 /* 播放器里的嵌入播放 */
 .player-stage iframe {
   width: 100%;
