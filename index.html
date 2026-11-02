@@ -67,19 +67,35 @@
 <div id="importSheet" class="sheet">
   <div class="sheet-body">
     <div class="sheet-head">
-      <h2>导入视频</h2>
+      <h2>收藏视频</h2>
       <button class="sheet-close" data-close="importSheet">✕</button>
     </div>
 
-    <label class="dropzone" for="fileInput">
-      <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/></svg>
-      <span class="dz-main">选择视频</span>
-      <span class="dz-sub">存在这台手机里，不经过网络，秒完成</span>
-    </label>
-    <input id="fileInput" type="file" accept="video/*" multiple hidden>
+    <div class="seg">
+      <button class="seg-btn active" data-pane="paneFile">从手机选</button>
+      <button class="seg-btn" data-pane="paneLink">贴链接</button>
+    </div>
+
+    <div id="paneFile">
+      <label class="dropzone" for="fileInput">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/></svg>
+        <span class="dz-main">选择视频</span>
+        <span class="dz-sub">存在这台手机里，不经过网络，秒完成</span>
+      </label>
+      <input id="fileInput" type="file" accept="video/*" multiple hidden>
+    </div>
+
+    <div id="paneLink" hidden>
+      <input id="linkInput" class="link-input" type="url" inputmode="url"
+             placeholder="粘贴视频链接…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div id="linkHint" class="link-hint">
+        支持 YouTube、B 站、视频直链（.mp4）和普通网页。能下载的会存到手机里，下不了的存成书签。
+      </div>
+      <button id="linkAdd" class="primary-btn">收藏</button>
+    </div>
 
     <div class="tag-picker">
-      <div class="tag-picker-head">导入时打标签（可跳过）</div>
+      <div class="tag-picker-head">打标签（可跳过）</div>
       <div id="importTags" class="chip-wrap"></div>
       <div class="newtag-row">
         <input id="importNewTag" placeholder="新标签…" maxlength="24">
@@ -115,7 +131,15 @@
       <svg viewBox="0 0 24 24"><path d="M12 3.6l2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.62l-5.1 2.68.97-5.68L3.75 9.6l5.7-.83z"/></svg>
     </button>
   </div>
-  <div class="player-stage"><video id="pv" playsinline controls preload="metadata"></video></div>
+  <div class="player-stage">
+    <video id="pv" playsinline controls preload="metadata"></video>
+    <iframe id="pframe" hidden allowfullscreen frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+    <div id="pLinkTip" class="link-tip" hidden>
+      <p>这个网站不允许在别处嵌入播放</p>
+      <a id="pLinkOpen" class="primary-btn" href="#" target="_blank" rel="noopener">在原网站打开</a>
+    </div>
+  </div>
   <div class="player-info">
     <h2 id="pTitle" class="p-title"></h2>
     <div id="pTags" class="chip-wrap small"></div>

@@ -249,8 +249,11 @@ async function saveVideo(v) {
 }
 
 async function removeVideo(v) {
-  await delBlob('media', v.fileKey);
-  await delBlob('thumbs', v.thumbKey);
+  // 链接收藏没有本地文件，不用删 blob
+  if (v.kind !== 'link') {
+    await delBlob('media', v.fileKey);
+    await delBlob('thumbs', v.thumbKey);
+  }
   dropThumbUrl(v.id);
   await idbDel('videos', v.id);
   state.videos = state.videos.filter((x) => x.id !== v.id);
@@ -338,6 +341,17 @@ function cardEl(v) {
       if (u) img.src = u;
       else { img.remove(); el.prepend(placeholderCover()); }
     });
+  } else if (v.kind === 'link' && v.thumb) {
+    // 链接收藏：YouTube 这类有现成的封面图
+    const img = document.createElement('img');
+    img.className = 'cover';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.src = v.thumb;
+    img.onerror = () => { img.remove(); el.prepend(placeholderCover()); };
+    el.appendChild(img);
   } else {
     el.appendChild(placeholderCover());
   }
@@ -346,10 +360,20 @@ function cardEl(v) {
   shade.className = 'shade';
   el.appendChild(shade);
 
-  if (v.tags && v.tags.length) {
+  const tags = (v.tags || []);
+  if (tags.length || v.kind === 'link') {
     const wrap = document.createElement('div');
     wrap.className = 'c-tags';
-    for (const t of v.tags.slice(0, 2)) {
+    if (v.kind === 'link') {
+      const s = document.createElement('span');
+      s.className = 'c-tag c-site';
+      s.textContent = v.source === 'youtube' ? 'YouTube'
+        : v.source === 'bilibili' ? 'B站'
+        : v.source === 'direct' ? '直链'
+        : (v.site || '网页');
+      wrap.appendChild(s);
+    }
+    for (const t of tags.slice(0, v.kind === 'link' ? 1 : 2)) {
       const s = document.createElement('span');
       s.className = 'c-tag';
       s.textContent = t;
@@ -688,6 +712,108 @@ async function importOne(file, tags) {
 
 let importing = false;
 
+/* ============================================================
+   从链接收藏
+   ============================================================ */
+
+/* 认链接：YouTube / 哔哩哔哩 / 视频直链 / 普通网页 */
+function parseUrl(raw) {
+  let u;
+  try { u = new URL(String(raw || '').trim()); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol)) return null;
+
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+  const full = u.href;
+
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host === 'music.youtube.com') {
+    let vid = u.searchParams.get('v');
+    if (!vid && host === 'youtu.be') vid = u.pathname.slice(1).split('/')[0];
+    if (!vid && u.pathname.startsWith('/shorts/')) vid = u.pathname.split('/')[2];
+    if (!vid && u.pathname.startsWith('/embed/')) vid = u.pathname.split('/')[2];
+    if (vid && /^[\w-]{6,20}$/.test(vid)) {
+      return {
+        source: 'youtube',
+        site: 'YouTube',
+        embed: 'https://www.youtube-nocookie.com/embed/' + vid + '?rel=0&playsinline=1',
+        thumb: 'https://i.ytimg.com/vi/' + vid + '/mqdefault.jpg',
+      };
+    }
+  }
+
+  const bv = full.match(/BV[0-9A-Za-z]{10}/);
+  if (host.endsWith('bilibili.com') && bv) {
+    return {
+      source: 'bilibili',
+      site: '哔哩哔哩',
+      embed: 'https://player.bilibili.com/player.html?bvid=' + bv[0] + '&autoplay=0',
+      thumb: null,
+    };
+  }
+
+  if (/\.(mp4|m4v|webm|mov|ogv|ogg)$/i.test(u.pathname)) {
+    return { source: 'direct', site: host, embed: full, thumb: null };
+  }
+
+  return { source: 'web', site: host, embed: full, thumb: null };
+}
+
+/* 先试着真的下载下来；下不了（跨域被挡 / 不是视频）就存成书签 */
+async function importLink(raw, tags) {
+  const info = parseUrl(raw);
+  if (!info) throw new Error('这不像一个网址（要 http:// 或 https:// 开头）');
+
+  if (info.source === 'direct' || info.source === 'web') {
+    const item = queueItem('试着下载 ' + info.site);
+    try {
+      item.set(12);
+      const res = await fetch(info.embed, { mode: 'cors', credentials: 'omit' });
+      const ct = String(res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && ct.startsWith('video/')) {
+        item.set(40);
+        const blob = await res.blob();
+        item.set(72);
+        let name = '视频.mp4';
+        try {
+          const seg = decodeURIComponent(new URL(info.embed).pathname.split('/').pop() || '');
+          if (/\.(mp4|m4v|webm|mov|ogv|ogg)$/i.test(seg)) name = seg;
+        } catch {}
+        const file = new File([blob], name, { type: ct.split(';')[0] });
+        const v = await importOne(file, tags);
+        v.fromUrl = info.embed;
+        v.source = info.source;
+        v.site = info.site;
+        await saveVideo(v);
+        item.set(100, 'done');
+        item.remove();
+        return v;
+      }
+      item.remove();
+    } catch (e) {
+      // 跨域被挡，或者对方不是视频 —— 落到下面存书签
+      item.remove();
+    }
+  }
+
+  const id = (crypto.randomUUID && crypto.randomUUID()) ||
+    (Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+
+  const v = {
+    id,
+    kind: 'link',
+    url: info.embed,
+    source: info.source,
+    site: info.site,
+    thumb: info.thumb,
+    title: info.site + ' 视频',
+    tags: [...tags],
+    duration: 0, width: 0, height: 0, size: 0,
+    starred: false,
+    createdAt: Date.now(),
+  };
+  await saveVideo(v);
+  return v;
+}
+
 async function handleFiles(fileList) {
   const files = [...(fileList || [])].filter((f) => {
     return f && (f.type.startsWith('video/') || /\.(mp4|m4v|mov|webm|mkv|avi|mpe?g|3gp|ts)$/i.test(f.name));
@@ -734,9 +860,52 @@ $('#fileInput').onchange = async (e) => {
 };
 
 /* ============================================================
+   导入面板：切换「从手机选 / 贴链接」
+   ============================================================ */
+document.querySelectorAll('.seg-btn').forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('active', x === b));
+    const target = b.dataset.pane;
+    document.querySelectorAll('#importSheet [id^="pane"]').forEach((p) => {
+      p.hidden = p.id !== target;
+    });
+  };
+});
+
+$('#linkInput').onkeydown = (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('#linkAdd').click(); }
+};
+
+$('#linkAdd').onclick = async () => {
+  const url = String($('#linkInput').value || '').trim();
+  if (!url) { toast('先粘贴一个链接'); return; }
+  const btn = $('#linkAdd');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '处理中…';
+  try {
+    const v = await importLink(url, [...state.importTags]);
+    $('#linkInput').value = '';
+    renderTags();
+    renderGrid();
+    await refreshStorage();
+    toast(v.kind === 'link'
+      ? `已收藏链接（${v.site || '网页'}）`
+      : '已下载到手机', 2600);
+    closeSheet('importSheet');
+  } catch (e) {
+    toast(String((e && e.message) || '收藏失败'), 3400);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '收藏';
+  }
+};
+
+/* ============================================================
    播放
    ============================================================ */
 const pv = $('#pv');
+const pframe = $('#pframe');
 let playerUrl = null;
 
 function renderStarBtn(v) {
@@ -800,6 +969,10 @@ $('#pStar').onclick = () => {
 };
 
 function renderPlayerMeta(v) {
+  if (v.kind === 'link') {
+    $('#pMeta').textContent = (v.site || '链接') + ' · 链接收藏 · ' + fmtDate(v.createdAt);
+    return;
+  }
   const parts = [];
   if (v.size) parts.push(fmtSize(v.size));
   if (v.width && v.height) parts.push(v.width + '×' + v.height);
@@ -821,6 +994,50 @@ function renderPlayerTags(v) {
 async function openPlayer(id) {
   const v = findVideo(id);
   if (!v) return;
+
+  /* ---------- 链接收藏 ---------- */
+  if (v.kind === 'link') {
+    state.currentId = id;
+    try { pv.pause(); } catch {}
+    pv.removeAttribute('src');
+    try { pv.load(); } catch {}
+    if (playerUrl) { URL.revokeObjectURL(playerUrl); playerUrl = null; }
+
+    $('#pTitle').textContent = v.title;
+    renderPlayerMeta(v);
+    renderPlayerTags(v);
+    renderStarBtn(v);
+
+    const tip = $('#pLinkTip');
+    if (v.source === 'youtube' || v.source === 'bilibili') {
+      pv.hidden = true; tip.hidden = true;
+      pframe.hidden = false; pframe.src = v.url;
+    } else if (v.source === 'direct') {
+      pframe.hidden = true; pframe.removeAttribute('src');
+      tip.hidden = true;
+      pv.hidden = false; pv.src = v.url; pv.load();
+    } else {
+      // 普通网页：不给嵌，给个跳转
+      pv.hidden = true;
+      pframe.hidden = true; pframe.removeAttribute('src');
+      tip.hidden = false;
+      $('#pLinkOpen').href = v.url;
+    }
+
+    const list = visibleVideos();
+    const idx = list.findIndex((x) => x.id === id);
+    $('#playerCounter').textContent = list.length > 1 ? `${idx + 1} / ${list.length}` : '';
+
+    $('#player').classList.add('open');
+    document.body.style.overflow = 'hidden';
+    return;
+  }
+
+  /* ---------- 本地视频 ---------- */
+  $('#pLinkTip').hidden = true;
+  pframe.hidden = true;
+  pframe.removeAttribute('src');
+  pv.hidden = false;
 
   const blob = await getBlob('media', v.fileKey);
   if (!blob) {
@@ -854,7 +1071,12 @@ function closePlayer() {
   document.body.style.overflow = '';
   try { pv.pause(); } catch {}
   pv.removeAttribute('src');
-  pv.load();
+  try { pv.load(); } catch {}
+  pframe.hidden = true;
+  pframe.removeAttribute('src');
+  pv.hidden = false;
+  const tip = $('#pLinkTip');
+  if (tip) tip.hidden = true;
   if (playerUrl) { URL.revokeObjectURL(playerUrl); playerUrl = null; }
   state.currentId = null;
 }

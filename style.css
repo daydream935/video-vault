@@ -635,6 +635,97 @@ textarea#linkInput::placeholder { color: #82828e; }
 .action-btn.on .action-ico { color: #ffc247; opacity: 1; }
 .action-btn.danger { color: #ff7b7b; }
 
+/* ================= 导入面板：分段切换 ================= */
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 14px;
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+.seg-btn {
+  flex: 1;
+  height: 34px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background .15s, color .15s;
+}
+.seg-btn.active {
+  background: var(--surface);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+
+.link-input {
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+}
+.link-input:focus { border-color: rgba(255, 122, 69, .55); }
+.link-hint {
+  margin: 10px 2px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.primary-btn {
+  display: block;
+  width: 100%;
+  height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 46px;
+  text-decoration: none;
+  font-family: inherit;
+}
+.primary-btn:active { transform: scale(.985); }
+.primary-btn:disabled { opacity: .55; }
+
+/* 链接卡片的站点角标 */
+.card .c-tag.c-site {
+  background: rgba(255, 122, 69, .6);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 播放器里的嵌入播放 */
+.player-stage iframe {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  background: #000;
+}
+
+/* 「这个网站不让嵌入」的提示 */
+.link-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 30px 26px;
+  text-align: center;
+}
+.link-tip p { margin: 0; color: var(--muted); font-size: 14px; }
+.link-tip .primary-btn { width: auto; padding: 0 26px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
