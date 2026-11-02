@@ -292,7 +292,6 @@ function renderTags() {
   star.setAttribute('aria-label', '只看标星');
   star.onclick = () => {
     state.onlyStar = !state.onlyStar;
-    if (state.onlyStar) state.activeTag = null;
     renderTags();
     renderGrid();
   };
@@ -454,6 +453,11 @@ function cardEl(v) {
 
   el.onclick = () => {
     if (longPressed) { longPressed = false; return; }
+    // 普通网页收藏：嵌入不了，直接去原网站，少点一次
+    if (v.kind === 'link' && v.source === 'web') {
+      window.open(v.url, '_blank', 'noopener');
+      return;
+    }
     openPlayer(v.id);
   };
   return el;
@@ -883,12 +887,26 @@ $('#fileInput').onchange = async (e) => {
    导入面板：切换「从手机选 / 贴链接」
    ============================================================ */
 document.querySelectorAll('.seg-btn').forEach((b) => {
-  b.onclick = () => {
+  b.onclick = async () => {
     document.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('active', x === b));
     const target = b.dataset.pane;
     document.querySelectorAll('#importSheet [id^="pane"]').forEach((p) => {
       p.hidden = p.id !== target;
     });
+    if (target === 'paneLink') {
+      const input = $('#linkInput');
+      // 切过来时如果剪贴板里有网址，自动填进（省得手动粘贴）
+      if (!input.value) {
+        try {
+          const text = (await navigator.clipboard.readText()).trim();
+          if (/^https?:\/\/\S+$/i.test(text)) {
+            input.value = text;
+            toast('已从剪贴板填入', 1400);
+          }
+        } catch {}
+      }
+      setTimeout(() => input.focus(), 140);
+    }
   };
 });
 
@@ -1029,6 +1047,9 @@ async function openPlayer(id) {
     renderStarBtn(v);
 
     const tip = $('#pLinkTip');
+    const visit = $('#pVisitSite');
+    visit.hidden = false;
+    visit.href = v.url;
     if (v.source === 'youtube' || v.source === 'bilibili') {
       pv.hidden = true; tip.hidden = true;
       pframe.hidden = false; pframe.src = v.url;
@@ -1055,6 +1076,7 @@ async function openPlayer(id) {
 
   /* ---------- 本地视频 ---------- */
   $('#pLinkTip').hidden = true;
+  $('#pVisitSite').hidden = true;
   pframe.hidden = true;
   pframe.removeAttribute('src');
   pv.hidden = false;
@@ -1097,6 +1119,8 @@ function closePlayer() {
   pv.hidden = false;
   const tip = $('#pLinkTip');
   if (tip) tip.hidden = true;
+  const visit = $('#pVisitSite');
+  if (visit) visit.hidden = true;
   if (playerUrl) { URL.revokeObjectURL(playerUrl); playerUrl = null; }
   state.currentId = null;
 }
