@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="视频库">
+<title>视频库</title>
+<link rel="icon" href="./icon-192.png" type="image/png">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="stylesheet" href="./style.css">
+<style>
+  .local-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 6px; margin-left: 8px;
+    background: rgba(255,122,69,.15); color: #ff9a6b;
+    vertical-align: middle; transform: translateY(-1px);
+  }
+  .storage-info {
+    font-size: 12px; line-height: 1.75; color: var(--muted);
+    margin-top: 14px; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,.06);
+  }
+  .storage-info b { color: #e8e8ee; font-weight: 600; }
+  .storage-warn { color: #ff9a6b; display: block; margin-top: 6px; }
+  .storage-ok { color: #5fbf7f; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5.5" width="13" height="13" rx="3"/><path d="M15.5 10.2l5-2.9a1 1 0 0 1 1.5.9v7.6a1 1 0 0 1-1.5.9l-5-2.9"/></svg>
+    <h1>视频库<span class="local-badge">本机</span></h1>
+  </div>
+  <button id="btnSearch" class="icon-btn" aria-label="搜索">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+  </button>
+</header>
+
+<div id="searchWrap" class="search-wrap">
+  <input id="q" type="search" inputmode="search" placeholder="搜标题、标签…" autocomplete="off">
+  <button id="btnSearchClear" class="search-clear" aria-label="清空">✕</button>
+</div>
+
+<nav id="tagbar" class="tagbar" aria-label="标签筛选"></nav>
+
+<main id="grid" class="grid"></main>
+
+<div id="empty" class="empty" hidden>
+  <div class="empty-art">
+    <svg viewBox="0 0 64 64"><rect x="6" y="14" width="38" height="36" rx="7"/><path d="M47 27l11-6.5v23L47 37"/></svg>
+  </div>
+  <p class="empty-title">还没有视频</p>
+  <p class="empty-sub">点右下角的 ＋ 导入第一条</p>
+</div>
+
+<button id="fab" class="fab" aria-label="导入视频">
+  <svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+</button>
+
+<!-- ============ 导入面板 ============ -->
+<div id="importSheet" class="sheet">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2>导入视频</h2>
+      <button class="sheet-close" data-close="importSheet">✕</button>
+    </div>
+
+    <label class="dropzone" for="fileInput">
+      <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/></svg>
+      <span class="dz-main">选择视频</span>
+      <span class="dz-sub">存在这台手机里，不经过网络，秒完成</span>
+    </label>
+    <input id="fileInput" type="file" accept="video/*" multiple hidden>
+
+    <div class="tag-picker">
+      <div class="tag-picker-head">导入时打标签（可跳过）</div>
+      <div id="importTags" class="chip-wrap"></div>
+      <div class="newtag-row">
+        <input id="importNewTag" placeholder="新标签…" maxlength="24">
+        <button id="importAddTag" class="mini-btn">加</button>
+      </div>
+    </div>
+    <div id="uploadQueue" class="queue"></div>
+    <div id="storageInfo" class="storage-info">读取存储信息…</div>
+  </div>
+</div>
+
+<!-- ============ 播放器 ============ -->
+<div id="player" class="player">
+  <div class="player-top">
+    <button id="playerClose" class="icon-btn on-dark" aria-label="关闭">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <span id="playerCounter" class="player-counter"></span>
+  </div>
+  <div class="player-stage"><video id="pv" playsinline controls preload="metadata"></video></div>
+  <div class="player-info">
+    <h2 id="pTitle" class="p-title"></h2>
+    <div id="pTags" class="chip-wrap small"></div>
+    <div id="pMeta" class="p-meta"></div>
+    <div class="player-actions">
+      <button id="pEdit" class="ghost-btn">改标题 / 标签</button>
+      <button id="pDelete" class="ghost-btn danger">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 编辑面板 ============ -->
+<div id="editor" class="sheet">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2>编辑</h2>
+      <button class="sheet-close" data-close="editor">✕</button>
+    </div>
+    <label class="field">
+      <span>标题</span>
+      <input id="eTitle" maxlength="120">
+    </label>
+    <div class="field">
+      <span>标签</span>
+      <div id="eTags" class="chip-wrap"></div>
+      <div class="newtag-row">
+        <input id="eNewTag" placeholder="新标签…" maxlength="24">
+        <button id="eAddTag" class="mini-btn">加</button>
+      </div>
+    </div>
+    <button id="eSave" class="primary-btn wide">保存</button>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div id="thumbStage" class="thumb-stage"></div>
+
+<script src="./local.js" type="module"></script>
+</body>
+</html>
