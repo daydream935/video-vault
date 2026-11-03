@@ -249,6 +249,7 @@ async function saveVideo(v) {
   const i = state.videos.findIndex((x) => x.id === v.id);
   if (i >= 0) state.videos[i] = v; else state.videos.unshift(v);
   rebuildTags();
+  scheduleSnapshot();
 }
 
 async function removeVideo(v) {
@@ -261,6 +262,7 @@ async function removeVideo(v) {
   await idbDel('videos', v.id);
   state.videos = state.videos.filter((x) => x.id !== v.id);
   rebuildTags();
+  scheduleSnapshot();
 }
 
 /* ============================================================
@@ -1090,6 +1092,7 @@ async function importOne(file, tags, groups) {
     const v = {
       id,
       title: safeTitle(file.name),
+      fileName: file.name,
       tags: [...tags],
       groups: [...(groups || [])],
       duration: meta.duration || 0,
@@ -1150,7 +1153,9 @@ function parseUrl(raw) {
       source: 'bilibili',
       site: '哔哩哔哩',
       embed: 'https://player.bilibili.com/player.html?bvid=' + bv[0] + '&autoplay=0',
-      thumb: null,
+      // B 站接口不给跨域，拿不到封面地址，用网页截图服务兜一张（加载不出就退回色块）
+      thumb: 'https://s.wordpress.com/mshots/v1/' +
+        encodeURIComponent('https://www.bilibili.com/video/' + bv[0]) + '?w=640&h=360',
     };
   }
 
@@ -1420,6 +1425,10 @@ function renderPlayerTags(v) {
 async function openPlayer(id) {
   const v = findVideo(id);
   if (!v) return;
+  if (v.fileMissing) {
+    toast('这条是备份里恢复的，视频文件不在了，要重新导入一次', 3400);
+    return;
+  }
 
   /* ---------- 链接收藏 ---------- */
   if (v.kind === 'link') {
@@ -1555,14 +1564,102 @@ function renderEditorTags() {
   }
 }
 
+/* ---------- 封面编辑 ---------- */
+let editorCoverKey = null;   // 从相册选的图，存在 OPFS
+let editorCoverUrl = '';     // 或者贴的图片链接
+let editorCoverDirty = false;
+
+async function renderEditorCover() {
+  const box = $('#eCoverPreview');
+  if (!box) return;
+  box.innerHTML = '';
+  let src = null;
+  if (editorCoverKey) {
+    const b = await getBlob('thumbs', editorCoverKey).catch(() => null);
+    if (b) src = URL.createObjectURL(b);
+  } else if (editorCoverUrl) {
+    src = editorCoverUrl;
+  } else if (editingId && !editorCoverDirty) {
+    // 只有用户没动过封面时，才回退显示原来的
+    const v = findVideo(editingId);
+    if (v && v.thumbKey) {
+      const b = await getBlob('thumbs', v.thumbKey).catch(() => null);
+      if (b) src = URL.createObjectURL(b);
+    }
+    if (!src && v && v.thumb) src = v.thumb;
+  }
+  if (!src) {
+    const span = document.createElement('span');
+    span.className = 'cover-empty';
+    span.textContent = '没有封面';
+    box.appendChild(span);
+    return;
+  }
+  const img = document.createElement('img');
+  img.alt = '';
+  img.referrerPolicy = 'no-referrer';
+  img.onerror = () => {
+    img.remove();
+    const span = document.createElement('span');
+    span.className = 'cover-empty';
+    span.textContent = '加载不出来';
+    box.appendChild(span);
+  };
+  img.src = src;
+  box.appendChild(img);
+}
+
+$('#eCoverPick').onclick = () => $('#eCoverFile').click();
+
+$('#eCoverFile').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  if (!/^image\//.test(f.type || '')) { toast('要选一张图片', 2000); return; }
+  if (f.size > 8 * 1024 * 1024) { toast('图片太大了（超过 8MB）', 2400); return; }
+  const key = 'cover-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  await putBlob('thumbs', key, f);
+  editorCoverKey = key;
+  editorCoverUrl = '';
+  $('#eCoverUrl').value = '';
+  editorCoverDirty = true;
+  renderEditorCover();
+};
+
+$('#eCoverUrl').oninput = () => {
+  const u = String($('#eCoverUrl').value || '').trim();
+  if (/^https?:\/\/\S+$/i.test(u)) {
+    editorCoverUrl = u;
+    editorCoverKey = null;
+    editorCoverDirty = true;
+  } else {
+    editorCoverUrl = '';
+    if (!u) { editorCoverDirty = true; }
+  }
+  renderEditorCover();
+};
+
+$('#eCoverClear').onclick = () => {
+  editorCoverKey = null;
+  editorCoverUrl = '';
+  $('#eCoverUrl').value = '';
+  editorCoverDirty = true;
+  renderEditorCover();
+};
+
 function openEditor(id) {
   const v = findVideo(id || state.currentId);
   if (!v) return;
   editingId = v.id;
   $('#eTitle').value = v.title;
   editorGroups = [...(v.groups || [])];
+  editorCoverKey = null;
+  editorCoverUrl = '';
+  editorCoverDirty = false;
+  $('#eCoverUrl').value = '';
   renderEditorGroups();
   renderEditorTags();
+  renderEditorCover();
   openSheet('editor');
 }
 
@@ -1589,6 +1686,26 @@ $('#eSave').onclick = async () => {
   if (!v) return;
   v.title = String($('#eTitle').value || '').trim().slice(0, 120) || '未命名';
   v.groups = [...editorGroups];
+
+  // 只在用户真的动过封面时才改，避免误删自动生成的缩略图
+  if (editorCoverDirty) {
+    const oldKey = v.thumbKey;
+    if (editorCoverKey) {
+      v.thumbKey = editorCoverKey;
+      v.thumb = null;
+    } else if (editorCoverUrl) {
+      v.thumb = editorCoverUrl;
+      v.thumbKey = null;
+    } else {
+      v.thumb = null;
+      v.thumbKey = null;
+    }
+    if (oldKey && oldKey !== v.thumbKey) {
+      try { await delBlob('thumbs', oldKey); } catch {}
+    }
+    dropThumbUrl(v.id);
+  }
+
   await saveVideo(v);
   editingId = null;
   closeSheet('editor');
@@ -1621,35 +1738,253 @@ $('#pDelete').onclick = async () => {
 /* ============================================================
    存储容量
    ============================================================ */
+async function readStorageState() {
+  let usage = 0, quota = 0, persisted = false, ok = false;
+  if (navigator.storage && navigator.storage.estimate) {
+    try {
+      const est = await navigator.storage.estimate();
+      usage = est.usage || 0;
+      quota = est.quota || 0;
+      ok = true;
+    } catch {}
+  }
+  try { persisted = await navigator.storage.persisted(); } catch {}
+  return { usage, quota, persisted, ok };
+}
+
 async function refreshStorage() {
+  const s = await readStorageState();
+  state.storage.usage = s.usage;
+  state.storage.quota = s.quota;
+  state.storage.persisted = s.persisted;
+  const pct = s.quota ? (s.usage / s.quota) * 100 : 0;
+
+  // 导入面板里那一行
   const el = $('#storageInfo');
-  if (!el) return;
-  if (!navigator.storage || !navigator.storage.estimate) {
-    el.textContent = '这个浏览器不支持存储信息查询';
+  if (el) {
+    if (!s.ok) {
+      el.textContent = '这个浏览器不支持存储信息查询';
+    } else {
+      el.innerHTML =
+        `已用 <b>${fmtSize(s.usage)}</b> · 可用 <b>${fmtSize(s.quota)}</b>` +
+        `<br>存储方式：${esc(opfs.ok ? '文件系统' : 'IndexedDB（较慢）')}` +
+        (pct > 80 ? `<span class="storage-warn">空间快满了（${pct.toFixed(0)}%），建议删一些</span>` : '') +
+        (s.persisted
+          ? `<span class="storage-ok">已申请长期存储，系统不会自动清理</span>`
+          : `<span class="storage-warn">还没拿到长期存储权限，空间紧张时系统可能清理</span>`);
+    }
+  }
+
+  // 设置面板
+  const line = $('#storageLine');
+  const fill = $('#storageFill');
+  const note = $('#storageNote');
+  if (line) {
+    if (!s.ok) {
+      line.textContent = '这个浏览器查不到存储信息';
+    } else {
+      line.innerHTML = `<b>${fmtSize(s.usage)}</b> / ${fmtSize(s.quota)}`;
+      if (fill) {
+        fill.style.width = Math.min(100, pct).toFixed(1) + '%';
+        fill.classList.toggle('warn', pct > 80);
+      }
+    }
+  }
+  if (note) {
+    const insecure = !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(location.origin) && !location.protocol.startsWith('https');
+    note.innerHTML =
+      `<div>· 当前地址：${esc(location.origin)}</div>` +
+      `<div>· 视频存在这台手机里，不经过任何服务器</div>` +
+      `<div>· ${s.ok && s.persisted
+        ? '已拿到长期存储，系统不会自动清理'
+        : '还没拿到长期存储权限，空间紧张时系统可能清理'}</div>` +
+      `<div>· 更新网页代码不会动这些数据</div>` +
+      `<div>· 删掉主屏图标或换网址打开，数据会读不到</div>` +
+      (insecure ? `<div class="storage-warn">· 这个地址不是 HTTPS，装不了 PWA，数据也可能不稳</div>` : '');
+  }
+}
+
+/* ---------- 备份 ---------- */
+function backupPayload() {
+  return {
+    app: 'video-vault',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    groups: state.groupPool,
+    videos: state.videos.map((v) => ({
+      id: v.id,
+      title: v.title,
+      tags: Array.isArray(v.tags) ? v.tags : [],
+      groups: Array.isArray(v.groups) ? v.groups : [],
+      starred: !!v.starred,
+      kind: v.kind || 'local',
+      source: v.source || null,
+      url: v.url || null,
+      embed: v.embed || null,
+      site: v.site || null,
+      thumb: v.thumb || null,
+      thumbKey: v.thumbKey || null,
+      name: v.fileName || v.name || null,
+      size: v.size || null,
+      mime: v.mime || v.type || null,
+      duration: typeof v.duration === 'number' ? v.duration : 0,
+      createdAt: v.createdAt || null,
+      fromUrl: v.fromUrl || null,
+    })),
+  };
+}
+
+/* ---------- 自动快照 ----------
+   每次改动后把元数据抄一份到 localStorage。
+   万一库被系统清了，至少标题/标签/分组/链接还能捞回来。 */
+const SNAPSHOT_KEY = 'vault-auto-snapshot';
+const SNAPSHOT_MAX = 400;
+let snapTimer = null;
+
+function writeSnapshot() {
+  try {
+    const p = backupPayload();
+    // 空快照不覆盖：清空操作不该把有用的备份一起抹掉
+    if (!p.videos.length) {
+      const old = readSnapshot();
+      if (old && old.videos.length) return;
+    }
+    if (p.videos.length > SNAPSHOT_MAX) p.videos = p.videos.slice(0, SNAPSHOT_MAX);
+    p.auto = true;
+    p.savedAt = Date.now();
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(p));
+  } catch (e) {
+    console.warn('[snapshot]', e);
+  }
+}
+
+function scheduleSnapshot() {
+  if (snapTimer) clearTimeout(snapTimer);
+  snapTimer = setTimeout(writeSnapshot, 1200);
+}
+
+function readSnapshot() {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return d && Array.isArray(d.videos) ? d : null;
+  } catch { return null; }
+}
+
+function exportBackup() {
+  try {
+    const data = backupPayload();
+    const json = JSON.stringify(data, null, 2);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'video-vault-backup-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast(`已导出 ${data.videos.length} 条信息`, 2600);
+  } catch (e) {
+    console.error(e);
+    toast('导出失败：' + e.message, 3000);
+  }
+}
+
+async function importBackup(file) {
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    toast('这个文件读不出来，不像是备份文件', 2600);
+    return;
+  }
+  if (!data || !Array.isArray(data.videos)) {
+    toast('备份格式不对', 2400);
     return;
   }
   try {
-    const est = await navigator.storage.estimate();
-    state.storage.usage = est.usage || 0;
-    state.storage.quota = est.quota || 0;
-    let persisted = false;
-    try { persisted = await navigator.storage.persisted(); } catch {}
-    state.storage.persisted = persisted;
-
-    const mode = opfs.ok ? '文件系统' : 'IndexedDB（较慢）';
-    const pct = state.storage.quota ? (state.storage.usage / state.storage.quota) * 100 : 0;
-
-    el.innerHTML =
-      `已用 <b>${fmtSize(state.storage.usage)}</b> · 可用 <b>${fmtSize(state.storage.quota)}</b>` +
-      `<br>存储方式：${esc(mode)}` +
-      (pct > 80 ? `<span class="storage-warn">空间快满了（${pct.toFixed(0)}%），建议删一些</span>` : '') +
-      (persisted
-        ? `<span class="storage-ok">已申请长期存储，系统不会自动清理</span>`
-        : `<span class="storage-warn">还没拿到长期存储权限，系统在空间紧张时可能清理数据</span>`);
+    let added = 0, skipped = 0, noFile = 0;
+    const have = new Set(state.videos.map((v) => v.id));
+    for (const raw of data.videos) {
+      if (!raw || !raw.id || have.has(raw.id)) { skipped++; continue; }
+      const v = { ...raw };
+      v.tags = Array.isArray(v.tags) ? v.tags : [];
+      v.groups = Array.isArray(v.groups) ? v.groups : [];
+      v.starred = !!v.starred;
+      if (v.kind !== 'link') { v.fileMissing = true; noFile++; }
+      await saveVideo(v);
+      added++;
+    }
+    if (Array.isArray(data.groups)) {
+      for (const g of data.groups) {
+        const name = typeof g === 'string' ? g : (g && g.name);
+        const icon = typeof g === 'string' ? '📁' : ((g && g.icon) || '📁');
+        if (name && !state.groupPool.some((x) => x.name === name)) {
+          state.groupPool.push({ name, icon });
+        }
+      }
+      saveGroupPool();
+    }
+    await loadAll();
+    for (const v of state.videos) {
+      if (typeof v.starred !== 'boolean') v.starred = false;
+      if (!Array.isArray(v.groups)) v.groups = [];
+    }
+    renderTags();
+    renderGrid();
+    await refreshStorage();
+    closeSheet('moreSheet');
+    toast(
+      `导入 ${added} 条` +
+      (skipped ? `，跳过 ${skipped} 条重复的` : '') +
+      (noFile ? `；${noFile} 条的视频要重新选文件` : ''),
+      3800
+    );
   } catch (e) {
-    el.textContent = '读不到存储信息';
+    console.error(e);
+    toast('导入失败：' + e.message, 3000);
   }
 }
+
+$('#btnMore').onclick = () => {
+  openSheet('moreSheet');
+  refreshStorage();
+  // 有自动快照才显示恢复按钮
+  const snap = readSnapshot();
+  const b = $('#btnRestoreSnap');
+  if (b) {
+    b.hidden = !snap;
+    if (snap) {
+      const when = snap.savedAt ? new Date(snap.savedAt) : null;
+      const label = b.querySelector('.action-label');
+      if (label) {
+        label.textContent =
+          `恢复上次快照（${snap.videos.length} 条` +
+          (when ? ' · ' + (when.getMonth() + 1) + '/' + when.getDate() + ' ' +
+            String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0') : '') +
+          '）';
+      }
+    }
+  }
+};
+$('#btnRestoreSnap').onclick = async () => {
+  const snap = readSnapshot();
+  if (!snap) { toast('没有可用的快照', 2200); return; }
+  const when = snap.savedAt ? new Date(snap.savedAt).toLocaleString() : '上次';
+  if (!confirm(`用 ${when} 的快照恢复？\n现有的不会删，重复的会跳过。`)) return;
+  const f = new File([JSON.stringify(snap)], 'snapshot.json', { type: 'application/json' });
+  await importBackup(f);
+};
+$('#btnExport').onclick = () => exportBackup();
+$('#btnImport').onclick = () => $('#backupFile').click();
+$('#backupFile').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) await importBackup(f);
+};
 
 /* ============================================================
    启动
@@ -1685,6 +2020,7 @@ async function boot() {
   renderTags();
   renderGrid();
   await refreshStorage();
+  scheduleSnapshot();
 
   window.__vault.ready = true;
 
@@ -1697,6 +2033,6 @@ async function boot() {
 }
 
 // 测试钩子（只暴露纯函数，不影响使用）
-window.__vault = { analyze, importOne, state, removeVideo, loadAll };
+window.__vault = { analyze, importOne, state, removeVideo, loadAll, backupPayload, exportBackup, importBackup };
 
 boot();

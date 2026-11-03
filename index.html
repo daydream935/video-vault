@@ -37,6 +37,9 @@
     <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5.5" width="13" height="13" rx="3"/><path d="M15.5 10.2l5-2.9a1 1 0 0 1 1.5.9v7.6a1 1 0 0 1-1.5.9l-5-2.9"/></svg>
     <h1>视频库<span class="local-badge">本机</span></h1>
   </div>
+  <button id="btnMore" class="icon-btn" aria-label="设置与备份">
+    <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+  </button>
   <button id="btnSearch" class="icon-btn" aria-label="搜索">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
   </button>
@@ -129,6 +132,45 @@
   </div>
 </div>
 
+<!-- ============ 设置 / 备份 ============ -->
+<div id="moreSheet" class="sheet">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2>设置</h2>
+      <button class="sheet-close" data-close="moreSheet">✕</button>
+    </div>
+
+    <div class="storage-box">
+      <div id="storageLine" class="storage-line">读取中…</div>
+      <div class="storage-bar"><i id="storageFill"></i></div>
+      <div id="storageNote" class="storage-note"></div>
+    </div>
+
+    <div class="more-actions">
+      <button id="btnExport" class="action-btn">
+        <span class="action-ico">↓</span>
+        <span class="action-label">导出备份</span>
+      </button>
+      <button id="btnImport" class="action-btn">
+        <span class="action-ico">↑</span>
+        <span class="action-label">导入备份</span>
+      </button>
+    </div>
+    <div class="more-actions">
+      <button id="btnRestoreSnap" class="action-btn" hidden>
+        <span class="action-ico">↺</span>
+        <span class="action-label">恢复上次快照</span>
+      </button>
+    </div>
+    <input id="backupFile" type="file" accept=".json,application/json" hidden>
+
+    <p class="more-tip">
+      备份里是标题、标签、分组、星标和收藏的链接，不含视频文件本身。<br>
+      视频存在手机本地，重装系统或删掉主屏图标会一起消失——那时候用备份把信息找回来。
+    </p>
+  </div>
+</div>
+
 <!-- ============ 分组面板 ============ -->
 <div id="groupSheet" class="sheet">
   <div class="sheet-body">
@@ -191,6 +233,18 @@
       <span>标题</span>
       <input id="eTitle" maxlength="120">
     </label>
+    <div class="field">
+      <span>封面</span>
+      <div class="cover-edit">
+        <div id="eCoverPreview" class="cover-preview"></div>
+        <div class="cover-btns">
+          <button id="eCoverPick" class="mini-btn">从相册选</button>
+          <button id="eCoverClear" class="mini-btn">清除</button>
+        </div>
+      </div>
+      <input id="eCoverUrl" class="cover-url" placeholder="或者贴图片链接…" autocomplete="off">
+      <input id="eCoverFile" type="file" accept="image/*" hidden>
+    </div>
     <div class="field">
       <span>分组</span>
       <div id="eGroups" class="chip-wrap"></div>
