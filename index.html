@@ -85,6 +85,7 @@
         <span class="dz-main">选择视频</span>
         <span class="dz-sub">存在这台手机里，不经过网络，秒完成</span>
       </label>
+      <p class="dz-tip">支持 mp4 / mov / m4v / webm。iPhone 相册里的视频直接选就行。</p>
       <input id="fileInput" type="file" accept="video/*" multiple hidden>
     </div>
 
@@ -151,10 +152,10 @@
         <span class="action-ico">↓</span>
         <span class="action-label">导出备份</span>
       </button>
-      <button id="btnImport" class="action-btn">
+      <label for="backupFile" class="action-btn">
         <span class="action-ico">↑</span>
         <span class="action-label">导入备份</span>
-      </button>
+      </label>
     </div>
     <div class="more-actions">
       <button id="btnRestoreSnap" class="action-btn" hidden>
@@ -238,7 +239,7 @@
       <div class="cover-edit">
         <div id="eCoverPreview" class="cover-preview"></div>
         <div class="cover-btns">
-          <button id="eCoverPick" class="mini-btn">从相册选</button>
+          <label for="eCoverFile" class="mini-btn">从相册选</label>
           <button id="eCoverClear" class="mini-btn">清除</button>
         </div>
       </div>

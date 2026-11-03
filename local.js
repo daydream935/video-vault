@@ -1259,7 +1259,7 @@ async function handleFiles(fileList) {
     await refreshStorage();
     toast(`已存入 ${ok} 个${bytes ? '，' + fmtSize(bytes) : ''}${bad ? `，失败 ${bad} 个` : ''}`, 2800);
   } else if (bad) {
-    toast(`全部失败（${bad} 个）`, 3000);
+    toast(`全部失败（${bad} 个）：手机解不开这个格式，试试 mp4`, 4000);
   }
 }
 
@@ -1609,21 +1609,70 @@ async function renderEditorCover() {
   box.appendChild(img);
 }
 
-$('#eCoverPick').onclick = () => $('#eCoverFile').click();
+/* 统一成 jpeg：iPhone 的 HEIC 也能用，大图顺手压到 1280 宽 */
+async function normalizeImage(file) {
+  let url = null;
+  try {
+    url = URL.createObjectURL(file);
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      const to = setTimeout(() => rej(new Error('timeout')), 12000);
+      i.onload = () => { clearTimeout(to); res(i); };
+      i.onerror = () => { clearTimeout(to); rej(new Error('decode')); };
+      i.src = url;
+    });
+    const nw = img.naturalWidth || 0;
+    const nh = img.naturalHeight || 0;
+    if (!nw || !nh) throw new Error('empty');
+    const maxW = 1280;
+    const scale = Math.min(1, maxW / nw);
+    const w = Math.max(1, Math.round(nw * scale));
+    const h = Math.max(1, Math.round(nh * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise((res) => cv.toBlob((b) => res(b), 'image/jpeg', 0.84));
+    return blob || file;
+  } catch (e) {
+    console.warn('[cover] 解码失败，按原文件存', e);
+    return file;
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
+}
 
 $('#eCoverFile').onchange = async (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  if (!/^image\//.test(f.type || '')) { toast('要选一张图片', 2000); return; }
-  if (f.size > 8 * 1024 * 1024) { toast('图片太大了（超过 8MB）', 2400); return; }
+  if (!/^image\//.test(f.type || '') && !/\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name || '')) {
+    toast('要选一张图片', 2200);
+    return;
+  }
+  if (f.size > 30 * 1024 * 1024) { toast('图片太大了（超过 30MB）', 2600); return; }
+
+  toast('正在处理这张图…', 1600);
+  const blob = await normalizeImage(f);
+  const name = (blob.type === 'image/jpeg' ? 'cover.jpg' : (f.name || 'cover.img'));
+  const wrapped = new File([blob], name, { type: blob.type || 'image/jpeg' });
   const key = 'cover-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  await putBlob('thumbs', key, f);
+  try {
+    await putBlob('thumbs', key, wrapped);
+  } catch (err) {
+    console.error(err);
+    toast('存不下这张图，换个小的试试', 2800);
+    return;
+  }
   editorCoverKey = key;
   editorCoverUrl = '';
   $('#eCoverUrl').value = '';
   editorCoverDirty = true;
   renderEditorCover();
+  toast('封面已换，记得点保存', 2000);
 };
 
 $('#eCoverUrl').oninput = () => {
@@ -1979,7 +2028,6 @@ $('#btnRestoreSnap').onclick = async () => {
   await importBackup(f);
 };
 $('#btnExport').onclick = () => exportBackup();
-$('#btnImport').onclick = () => $('#backupFile').click();
 $('#backupFile').onchange = async (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -2033,6 +2081,6 @@ async function boot() {
 }
 
 // 测试钩子（只暴露纯函数，不影响使用）
-window.__vault = { analyze, importOne, state, removeVideo, loadAll, backupPayload, exportBackup, importBackup };
+window.__vault = { analyze, importOne, state, removeVideo, loadAll, backupPayload, exportBackup, importBackup, getBlob, putBlob };
 
 boot();
